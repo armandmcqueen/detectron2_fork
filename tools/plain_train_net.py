@@ -159,12 +159,24 @@ def do_train(cfg, model, resume=False):
             iteration = iteration + 1
             storage.step()
 
-            loss_dict = model(data)
-            losses = sum(loss_dict.values())
-            assert torch.isfinite(losses).all(), loss_dict
+            if iteration == 500:
+                print("Iteration 500. Profiling!")
+                with torch.autograd.profiler.profile(use_cuda=True, record_shapes=True) as prof:
+                    loss_dict = model(data)
+                    losses = sum(loss_dict.values())
+                    assert torch.isfinite(losses).all(), loss_dict
 
-            loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
-            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+                    loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
+                    losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+                print(prof.key_averages().table(sort_by="self_cpu_time_total"))
+                prof.export_chrome_trace("/root/trace.json")
+            else:
+                loss_dict = model(data)
+                losses = sum(loss_dict.values())
+                assert torch.isfinite(losses).all(), loss_dict
+
+                loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
+                losses_reduced = sum(loss for loss in loss_dict_reduced.values())
             if comm.is_main_process():
                 storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
 
