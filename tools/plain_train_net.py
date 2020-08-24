@@ -21,6 +21,7 @@ It also includes fewer abstraction, therefore is easier to add custom logic.
 
 import logging
 import os
+import time
 from collections import OrderedDict
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -154,8 +155,12 @@ def do_train(cfg, model, resume=False):
     # precise BN here, because they are not trivial to implement
     data_loader = build_detection_train_loader(cfg)
     logger.info("Starting training from iteration {}".format(start_iter))
+    forward_pass_end_time = time.perf_counter()
     with EventStorage(start_iter) as storage:
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
+            iteration_start_time = time.perf_counter()
+            if comm.get_rank() == 0:
+                print("Approx backwards pass duration: ", iteration_start_time - forward_pass_end_time)
             iteration = iteration + 1
             storage.step()
 
@@ -180,6 +185,7 @@ def do_train(cfg, model, resume=False):
             if comm.is_main_process():
                 storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
 
+            forward_pass_end_time = time.perf_counter()
             optimizer.zero_grad()
             losses.backward()
             optimizer.step()
